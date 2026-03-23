@@ -21,7 +21,41 @@ Autoencoder (VAE) 空间压缩的目标是学习两个映射函数：编码器 (
 
 具体来说，给定一张图像 $x \in \mathbb{R}^{H \times W \times 3}$，通过编码器 $\mathcal{E}$ 可以将其转换为一个低维的潜在表示 $z = \mathcal{E}(x)$，其中 $z \in \mathbb{R}^{h \times w \times c}$，且通常 $h \ll H, w \ll W$。随后，解码器 $\mathcal{D}$ 可以用来将 $z$ 恢复回原始图像空间，即 $\mathcal{D}(z) \approx x$。
 
-这样一来，扩散操作就不再直接作用于像素空间 $x$，而是在潜在特征空间 $z$ 上进行，从而大幅减少了计算开销。
+假设像素空间  $x$ 服从一个复杂的分布 $p(x)$，我们想要求潜变量的后验分布 $p(z|x)$；引入一个可计算的分布 $q_\phi(z|x)$（即编码器 $\mathcal{E}$）来逼近真实的后验分布。构造的数学目标是最小化 $q$ 与 $p$ 之间的 KL 散度。我们注意到对于一个给定的图像 $x$ 来说，$\log p(x)$ 是一个常数，满足：
+
+$$
+\begin{aligned}
+\log p(x) &= \mathbb{E}_q \left[ \log \frac{p(x, z)}{p(z|x)} \right]\\
+&= \mathbb{E}_q \left[ \log \left( \frac{p(x, z)}{q_\phi(z|x)} \cdot \frac{q_\phi(z|x)}{p(z|x)} \right) \right]\\
+&= \underbrace{\mathbb{E}_q \left[ \log \frac{p(x, z)}{q_\phi(z|x)} \right]}_{\text{ELBO}} + \underbrace{\mathbb{E}_q \left[ \log \frac{q_\phi(z|x)}{p(z|x)} \right]}_{D_{KL}(q \| p)}
+\end{aligned}
+$$
+
+$D_{KL} \geq 0$，所以第一项就是 $\log p(x)$ 的下界。我们最大化这个下界以最小化两个分布之间的 KL 散度：
+
+$$
+\begin{aligned}
+\text{ELBO} &= \mathbb{E}_q [\log p(x|z) + \log p(z) - \log q_\phi(z|x)]\\
+&= {\mathbb{E}_q [\log p(x|z)]} - {\mathbb{E}_q \left[ \log \frac{q_\phi(z|x)}{p(z)} \right]}\\
+&= \underbrace{\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]}_{\text{重建项 (Reconstruction)}} - \underbrace{D_{KL}(q_\phi(z|x) \| p(z))}_{\text{正则项 (Regularization)}}
+\end{aligned}
+$$
+
+</br>
+
+反向传播要求损失函数对参数 $\phi$ 是可导的。编码器输出分布参数（比如均值 $\mu$ 和方差 $\sigma$）。$x \to \text{Encoder}(\phi) \to \text{Dist}(\mu, \sigma) \xrightarrow{\text{sampling}} z \to \text{Decoder} \to \text{Loss}$。
+
+然而在计算 $\partial \text{Loss}/\partial \phi$ 时，梯度必须流经 $z$ 到达 $\phi$。但 $z$ 是采样得到的，因而是不可导的。就像掷骰子的结果（$z$）和骰子（分布）的参数（$\mu, \sigma$）之间的数学关系是断裂的。无法写出一个确定性的函数 $f(\mu, \sigma)$ 来表示这个采样过程的导数。
+
+解决办法是从标准正态分布中采样一个噪声 $\epsilon \sim \mathcal{N}(0, 1)$。对于参数 $\phi$ 来说，$z$ 的表达式现在是完全可微的，而且还保持了分布
+
+$$z = \mu + \sigma \odot \epsilon\sim \mathcal{N(\mu,\epsilon)}, \quad \epsilon \sim \mathcal{N}(0, \mathbf{I})$$
+
+</br>
+
+其中 $\mu$ 和 $\sigma$ 是编码器 $\mathcal{E}$ 输出的两个向量。这样，随机性被转移到了 $\epsilon$ 上，而对 $\mu$ 和 $\sigma$ 的梯度可以顺畅地流回编码器。这个技巧叫做重参数化。
+
+这样一来，diffusion 就不再直接作用于像素空间 $x$，而是在潜在特征空间 $z$ 上进行，从而大幅减少了计算开销。
 
 ---
 
